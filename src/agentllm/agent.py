@@ -16,9 +16,6 @@ EXECUTION RULES:
 4. Analyze outputs carefully at each step before concluding.
 """
 
-
-
-
 class AutonomousAgent:
     """Agent orchestrating the tool-use loop between the LLM and the Docker sandbox."""
 
@@ -27,7 +24,8 @@ class AutonomousAgent:
         self.tools_list = create_agent_tools(sandbox)
         self.llm = ChatOllama(
             model=model_name,
-            temperature=0,
+            temperature=0.1,
+            num_ctx=16384,
             base_url="http://localhost:11434"
         ).bind_tools(self.tools_list)
 
