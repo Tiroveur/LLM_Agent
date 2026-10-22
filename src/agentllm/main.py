@@ -1,8 +1,24 @@
 """Entry point for the autonomous AI agent."""
 
 import argparse
+import logging
+
 from agentllm.sandbox import DockerSandbox
 from agentllm.agent import AutonomousAgent
+from agentllm.multi_agent import MultiAgentSystem
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -25,11 +41,10 @@ def main():
     )
     args = parser.parse_args()
 
-    sandbox = DockerSandbox(container_name=args.container)
-    
-    # On passe la limite max_steps à l'agent s'il l'accepte dans son __init__ 
-    # (ou on l'ajuste selon la signature de ton AutonomousAgent)
-    agent = AutonomousAgent(sandbox=sandbox)
+    print("Bienvenue dans l'agent autonome AutonomousAgent !")
+
+    agent = None
+    multi_agent = None
 
     while True:
         try:
@@ -40,9 +55,27 @@ def main():
 
         if user_task.lower().replace(" ", "") in ["exit", "quit"]:
             break
-        
+
         if user_task.strip():
-            agent.run(user_task,max_steps=args.max_steps)
+            # Initialisation différée (Lazy Initialization)
+            if agent is None:
+                print("[Initialisation] Connexion au bac à sable Docker et chargement des modèles LLM...", flush=True)
+                try:
+                    sandbox = DockerSandbox(container_name=args.container)
+                    agent = AutonomousAgent(sandbox=sandbox)
+                    multi_agent = MultiAgentSystem()
+                    print("[Initialisation] Prêt !\n")
+                except Exception as e:
+                    print(f"\n[Erreur d'initialisation] Impossible de démarrer l'agent ou Docker : {e}")
+                    continue
+
+            try:
+                refined_task = multi_agent.process_task(user_task)
+                agent.run(refined_task, max_steps=args.max_steps)
+                
+            except (KeyboardInterrupt, EOFError):
+                print("\nArrêt de la tâche en cours.")
+                continue
 
 
 if __name__ == "__main__":
