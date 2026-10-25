@@ -6,7 +6,7 @@ import re
 class MultiAgentSystem:
     def __init__(self):
         self.strategist_llm = ChatOllama(model="maternion/mimo-v2.6-heretic:9b", temperature=0.7)
-        self.coder_llm = ChatOllama(model="qwen2.5-coder", temperature=0.1)
+        self.coder_llm = ChatOllama(model="qwen2.5-coder:14b", temperature=0.1)
 
     def process_task(self, raw_task: str) -> str:
         print("[Stratège] Analyse de la tâche...")
