@@ -21,7 +21,6 @@ def get_edit_file_tool(sandbox):
         if replace_str:
             replace_str = replace_str.replace("\u00a0", " ").replace("\xa0", " ").replace("\r\n", "\n").replace("\r", "\n")
 
-        # 2. Gestion propre du chemin pour éviter les erreurs de localisation
         if not file_path.startswith("/"):
             file_path = os.path.join("/tmp", file_path)
         elif not file_path.startswith("/tmp/"):

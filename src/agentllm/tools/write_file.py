@@ -18,7 +18,6 @@ def get_write_file_tool(sandbox):
             if file_path.endswith(".py"):
                 content = re.sub(r'^#!.*\n?', '', content)
 
-        # 2. Gestion propre du chemin
         if not file_path.startswith("/"):
             file_path = os.path.join("/tmp", file_path)
         elif not file_path.startswith("/tmp/"):

@@ -21,9 +21,7 @@ class MultiAgentSystem:
         response = self.strategist_llm.invoke([HumanMessage(content=strategy_prompt)])
         raw_content = response.content
         
-        # Extraction et nettoyage robuste du JSON (au cas où le modèle ajoute du markdown ou du texte)
         try:
-            # Cherche un bloc de code markdown json ou des accolades globales
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
@@ -33,10 +31,8 @@ class MultiAgentSystem:
                 
             parsed_data = json.loads(json_str)
             
-            # Reconstruction d'un texte propre et structuré pour l'agent codeur
             cleaned_instructions = f"Entrée attendue : {parsed_data.get('entree', 'Non spécifié')} | Sortie attendue : {parsed_data.get('sortie', 'Non spécifié')}"
         except (json.JSONDecodeError, AttributeError):
-            # Fallback si le modèle n'a pas respecté le JSON
             cleaned_instructions = raw_content
             
         print(f"[Stratège] Instructions générées :\n{cleaned_instructions}\n")
