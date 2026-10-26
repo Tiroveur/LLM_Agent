@@ -152,15 +152,20 @@ class AutonomousAgent:
 
             messages.append(response)
 
-            # --- FILET DE SÉCURITÉ UNIFIÉ : EXTRACTION JSON ROBUSTE ---
             if not response.tool_calls and response.content:
-                # Utilisation d'une regex multi-lignes plus souple pour capturer le JSON d'outil
-                json_match = re.search(r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}', response.content, re.DOTALL)
+                content = response.content.strip()
+                
+                if content.startswith("```"):
+                    content = re.sub(r"^```(?:json)?\s*", "", content)
+                    content = re.sub(r"\s*```$", "", content)
+                    content = content.strip()
+
+                json_match = re.search(r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}', content, re.DOTALL)
                 if json_match:
                     try:
-                        # Nettoyage éventuel des retours à la ligne indésirables dans le texte brut
                         json_str = json_match.group(0)
-                        tool_data = json.loads(json_str)
+                        json_str_fixed = json_str.replace(r"\'", "'")
+                        tool_data = json.loads(json_str_fixed)
                         
                         response.tool_calls = [{
                             "name": tool_data["name"],
@@ -170,7 +175,20 @@ class AutonomousAgent:
                         print(f"[JSON Intercepté] Outil détecté : {tool_data['name']}")
                     except json.JSONDecodeError as e:
                         logger.error("Erreur de décodage JSON sur le fallback : %s", e)
-            # ---------------------------------------------------------------------------------
+                
+                elif content.startswith("{") and content.endswith("}"):
+                    try:
+                        json_str_fixed = content.replace(r"\'", "'")
+                        tool_data = json.loads(json_str_fixed)
+                        if "name" in tool_data and "arguments" in tool_data:
+                            response.tool_calls = [{
+                                "name": tool_data["name"],
+                                "args": tool_data["arguments"],
+                                "id": "fallback_json_id"
+                            }]
+                            print(f"[JSON Intercepté (Brut)] Outil détecté : {tool_data['name']}")
+                    except json.JSONDecodeError as e:
+                        logger.error("Erreur de décodage JSON sur le bloc global : %s", e)
 
             if not response.tool_calls:
                 print("\nTASK COMPLETED OR STOPPED (No tool called).")
