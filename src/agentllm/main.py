@@ -71,7 +71,8 @@ def main():
 
             try:
                 refined_task = multi_agent.process_task(user_task)
-                agent.run(refined_task, max_steps=args.max_steps)
+                #agent.run(refined_task, max_steps=args.max_steps)
+                agent.run(refined_task)
                 
             except (KeyboardInterrupt, EOFError):
                 print("\nArrêt de la tâche en cours.")

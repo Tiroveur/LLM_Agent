@@ -10,7 +10,12 @@ logger = logging.getLogger(__name__)
 def get_write_file_tool(sandbox):
     @tool
     def write_file(file_path: str, content: str) -> str:
-        """Writes text content to a file inside the sandbox container safely using Base64 with sanitization."""
+        """Writes text content to a file inside the sandbox container safely using Base64 with sanitization.
+        
+        Args:
+                    file_path: The path in the repo /tmp.
+                    content : The content of the file to write 
+        """
 
         if content:
             content = content.replace("\u00a0", " ").replace("\xa0", " ")
@@ -30,7 +35,7 @@ def get_write_file_tool(sandbox):
             file_path = os.path.join("/tmp", os.path.basename(file_path))
 
         is_script = file_path.endswith(".sh")
-        is_destructive_content = bool(re.search(r"\brm\b", content)) or "mkfs" in content
+        is_destructive_content = bool(re.search(r"\brm\b", content)) or "mkfs" in content or "os.re" in content
 
         if is_script or is_destructive_content:
             print("\n" + "=" * 60)

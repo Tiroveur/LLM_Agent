@@ -8,10 +8,16 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
 
+
+
 from agentllm.sandbox import DockerSandbox
 from agentllm.tools import create_agent_tools
 
 logger = logging.getLogger(__name__)
+
+import langchain
+langchain.debug = True
+logging.basicConfig(level=logging.DEBUG)
 
 SYSTEM_PROMPT = """{
   'role': 'system',
@@ -40,29 +46,19 @@ class AutonomousAgent:
     def _invoke_llm_with_retry(
         self, messages: list, max_retries: int = 3, delay: int = 2
     ) -> object:
-        """Invoke the LLM in streaming mode with a retry mechanism."""
+        """Invoke the LLM in non-streaming mode with a retry mechanism."""
         for attempt in range(1, max_retries + 1):
             try:
-                stream = self.llm.stream(messages)
+                # On utilise invoke() pour récupérer directement l'AIMessage complet
+                response = self.llm.invoke(messages)
 
-                accumulated_chunk = None
-                has_content = False
                 print("Thought: ", end="", flush=True)
+                if response.content:
+                    print(response.content, flush=True)
+                else:
+                    print("(No textual thought, direct tool call)", flush=True)
 
-                for chunk in stream:
-                    if chunk.content:
-                        print(chunk.content, end="", flush=True)
-                        has_content = True
-
-                    if accumulated_chunk is None:
-                        accumulated_chunk = chunk
-                    else:
-                        accumulated_chunk += chunk
-
-                if not has_content:
-                    print("(No textual thought, direct tool call)", end="")
-                print()
-                return accumulated_chunk
+                return response
 
             except Exception as error:
                 logger.error(
