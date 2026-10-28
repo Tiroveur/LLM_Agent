@@ -43,8 +43,8 @@ Tested setup: Windows for Ollama and WSL environment, RTX 4070 Laptop (8 GB VRAM
 ## Installation
 
 ```bash
-git clone <repository-url>
-cd <project-folder>
+git clone https://github.com/Tiroveur/LLM_Agent.git
+cd AgentLLM
 uv sync
 ollama pull maternion/mimo-v2.6-heretic:9b
 ```
