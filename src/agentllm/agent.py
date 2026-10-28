@@ -61,6 +61,16 @@ def _extract_tool_call(content: str, valid_names: set[str]) -> dict | None:
         return {"name": name, "args": args, "id": uuid.uuid4().hex}
     return None
 
+def log_timing(response) -> None:
+    m = response.response_metadata
+    ns = 1e9
+    gen_s = max(m.get("eval_duration", 0) / ns, 1e-9)
+    print(
+        f"[timing] chargement={m.get('load_duration', 0) / ns:.1f}s | "
+        f"prompt={m.get('prompt_eval_count')} tok en {m.get('prompt_eval_duration', 0) / ns:.1f}s | "
+        f"génération={m.get('eval_count')} tok en {gen_s:.1f}s "
+        f"({m.get('eval_count', 0) / gen_s:.1f} tok/s)"
+    )
 
 class AutonomousAgent:
     """Agent orchestrating the tool-use loop between the LLM and the Docker sandbox."""
@@ -84,6 +94,7 @@ class AutonomousAgent:
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.llm.invoke(messages)
+                log_timing(response=response)
 
                 print("Thought: ", end="", flush=True)
                 if response.content:

@@ -1,0 +1,92 @@
+[settings]
+always_ask_extensions = [".sh"]
+
+[[rule]]
+level = "HIGH"
+pattern = '\brm\s+(-\w+\s+)*-\w*[rRfF]\w*'
+reason = "suppression récursive ou forcée (rm -r / -f)"
+
+[[rule]]
+level = "HIGH"
+pattern = '\bmkfs(\.\w+)?\b'
+reason = "formatage de disque (mkfs)"
+
+[[rule]]
+level = "HIGH"
+pattern = '\bdd\b[^\n]*\bof='
+reason = "écriture brute avec dd"
+
+[[rule]]
+level = "HIGH"
+pattern = '>\s*/dev/(sd|nvme|vd|hd)\w*'
+reason = "écriture sur un périphérique bloc"
+
+[[rule]]
+level = "HIGH"
+pattern = ':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:'
+reason = "fork bomb"
+
+[[rule]]
+level = "HIGH"
+pattern = '\b(shutdown|reboot|halt|poweroff)\b|\binit\s+0\b'
+reason = "arrêt ou redémarrage"
+
+[[rule]]
+level = "HIGH"
+pattern = '\b(chmod|chown)\s+(-R\s+)?[^\n]*\s/(\s|$)'
+reason = "changement de droits sur la racine"
+
+[[rule]]
+level = "HIGH"
+pattern = 'docker\.sock|\bdocker\b'
+reason = "accès à Docker (tentative d'évasion)"
+
+[[rule]]
+level = "HIGH"
+pattern = '\b(curl|wget)\b[^\n|]*\|\s*(sudo\s+)?(ba|z)?sh\b'
+reason = "exécution de code téléchargé (curl | sh)"
+
+[[rule]]
+level = "HIGH"
+pattern = '/etc/(passwd|shadow|sudoers)|\.ssh/|id_rsa'
+reason = "accès à des identifiants ou fichiers système"
+
+[[rule]]
+level = "HIGH"
+pattern = 'os\.(remove|unlink|rmdir|removedirs)\s*\(|shutil\.rmtree|\.unlink\s*\('
+reason = "suppression de fichiers en Python"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\brm\b'
+reason = "suppression de fichiers (rm)"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\bsudo\b|\bsu\s+-?\w*'
+reason = "élévation de privilèges"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\b(kill|killall|pkill)\b'
+reason = "arrêt de processus"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\b(curl|wget|nc|ncat|netcat|ssh|scp|rsync|ftp)\b'
+reason = "accès réseau"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\bimport\s+(socket|requests|urllib|paramiko)\b|http\.client'
+reason = "accès réseau en Python"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\bsubprocess\b|os\.system|os\.popen|\beval\s*\(|\bexec\s*\(|__import__'
+reason = "exécution dynamique de code ou de commandes"
+
+[[rule]]
+level = "MEDIUM"
+pattern = '\bapt(-get)?\s+(remove|purge)\b|\bpip3?\s+uninstall\b'
+reason = "désinstallation de paquets"

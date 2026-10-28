@@ -56,7 +56,6 @@ def main():
             break
 
         if user_task.strip():
-            # Initialisation différée (Lazy Initialization)
             if agent is None:
                 print("[Initialisation] Connexion au bac à sable Docker et chargement des modèles LLM...", flush=True)
                 try:
