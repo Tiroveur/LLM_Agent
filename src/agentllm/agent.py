@@ -4,52 +4,85 @@ import json
 import logging
 import re
 import time
+import uuid
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
 
-
-
+from agentllm.multi_agent import MODEL, NUM_CTX
 from agentllm.sandbox import DockerSandbox
 from agentllm.tools import create_agent_tools
 
 logger = logging.getLogger(__name__)
 
-import langchain
-langchain.debug = True
-logging.basicConfig(level=logging.DEBUG)
+SYSTEM_PROMPT = """You are an expert autonomous Linux execution agent operating in an Ubuntu sandbox container.
+Your objective is to execute the provided technical instructions successfully using your available tools.
 
-SYSTEM_PROMPT = """{
-  'role': 'system',
-  'content': 'You are an expert autonomous Linux execution agent operating in an Ubuntu sandbox container.\nYour objective is to execute the provided technical instructions successfully using your available tools.\n\nCRITICAL RULES FOR TOOL USAGE:\n0. ONE STEP AT A TIME: Never generate multiple files or multiple code blocks in a single response. Perform one action (write one file or run one command), wait for the result, and then proceed to the next step.\n1. NEVER call `finish_task` on the first step. You must first create or modify the necessary files using `write_file` or `edit_file`, and verify them.\n2. Do not write code inside your text thoughts to simulate file creation. You MUST call the `write_file` tool natively.\n3. The shared host directory is `/mnt/shared` in READ-ONLY mode. Always copy files to `/tmp` to modify them.\n4. If you need to create a script or a file, use the `write_file` tool instead of bash commands.\n5. If you need to edit an existing file surgically, use the `edit_file` tool.\n6. When you have successfully completed the task and verified the output files, call the `finish_task` tool to provide your final summary.\n7. If a package is missing, install it via bash using `DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y <package>`.\n8. When executing a Python script via bash, always invoke it explicitly using `python3 /tmp/script_name.py`.\n9. NEVER rewrite a file that you have already successfully created and tested unless you are surgically modifying it with `edit_file`.\n10. Never use shell expansion like `{a..z}{a..z}...` for large password lists. Always write a compact Python script using `itertools` to handle combinatorial generation safely.\n\nProgramming language: Shell, Python. Always output a valid tool call in JSON. Environment possible thx to uv for python. \nNever retry something that you already tried. You will execute every program that you create to be sure that it`s working on the computer\nYou can create file only on /tmp directory"
-}"""
+CRITICAL RULES FOR TOOL USAGE:
+0. ONE STEP AT A TIME: Never generate multiple files or multiple code blocks in a single response. Perform one action (write one file or run one command), wait for the result, then proceed.
+1. NEVER call `finish_task` on the first step. First create or modify the necessary files with `write_file` or `edit_file`, and verify them.
+2. Always act through the provided tools (function calling). Never write JSON or code blocks in your message to simulate a tool call.
+3. The shared host directory is `/mnt/shared` in READ-ONLY mode. Always copy files to `/tmp` to modify them.
+4. If you need to create a script or a file, use `write_file` instead of bash commands.
+5. If you need to edit an existing file surgically, use `edit_file`.
+6. When you have completed the task and verified the output files, call `finish_task` with your final summary.
+7. If a package is missing, install it via bash using `DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y <package>`.
+8. When executing a Python script via bash, always invoke it explicitly using `python3 /tmp/script_name.py`.
+9. NEVER rewrite a file that you have already created and tested, unless you modify it surgically with `edit_file`.
+10. Never use shell expansion like `{a..z}{a..z}...` for large password lists. Write a compact Python script using `itertools` instead.
+
+Programming languages: Shell, Python (environment managed with uv).
+Never retry something that you already tried. Execute every program you create to be sure it works.
+You can create files only in the /tmp directory."""
+
+MAX_TOOL_OUTPUT_CHARS = 4000
+MAX_NUDGES = 2
+
+
+def _extract_tool_call(content: str, valid_names: set[str]) -> dict | None:
+    """Récupère un appel d'outil écrit en JSON nu, en ```json ou dans <tool_call>."""
+    if not content:
+        return None
+
+    cleaned = re.sub(r"</?tool_call>|```(?:json)?", "", content).strip()
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        data = json.loads(match.group(0).replace(r"\'", "'"))
+    except json.JSONDecodeError as error:
+        logger.error("Erreur de décodage JSON sur le fallback : %s", error)
+        return None
+
+    name = data.get("name")
+    args = data.get("arguments") or data.get("parameters")
+    if name in valid_names and isinstance(args, dict):
+        return {"name": name, "args": args, "id": uuid.uuid4().hex}
+    return None
+
 
 class AutonomousAgent:
     """Agent orchestrating the tool-use loop between the LLM and the Docker sandbox."""
 
-    def __init__(
-        self,
-        sandbox: DockerSandbox,
-        model_name: str = "qwen2.5-coder",
-    ) -> None:
+    def __init__(self, sandbox: DockerSandbox, model_name: str = MODEL) -> None:
         self.sandbox = sandbox
         self.tools_list = create_agent_tools(sandbox)
         self.llm = ChatOllama(
             model=model_name,
             temperature=0.1,
-            num_ctx=16384,
+            num_ctx=NUM_CTX,
+            reasoning=False,
+            keep_alive="10m",
             base_url="http://localhost:11434",
         ).bind_tools(self.tools_list)
 
         self.tool_map = {tool.name: tool for tool in self.tools_list}
 
-    def _invoke_llm_with_retry(
-        self, messages: list, max_retries: int = 3, delay: int = 2
-    ) -> object:
+    def _invoke_llm_with_retry(self, messages: list, max_retries: int = 3, delay: int = 2):
         """Invoke the LLM in non-streaming mode with a retry mechanism."""
         for attempt in range(1, max_retries + 1):
             try:
-                # On utilise invoke() pour récupérer directement l'AIMessage complet
                 response = self.llm.invoke(messages)
 
                 print("Thought: ", end="", flush=True)
@@ -62,20 +95,16 @@ class AutonomousAgent:
 
             except Exception as error:
                 logger.error(
-                    "Model invocation error (attempt %d/%d): %s",
-                    attempt,
-                    max_retries,
-                    error,
+                    "Model invocation error (attempt %d/%d): %s", attempt, max_retries, error
                 )
                 if attempt == max_retries:
-                    raise error
+                    raise
                 time.sleep(delay)
-        return None
 
-    def _execute_tools(self, response, messages: list) -> bool:
-        """Execute tools requested by the model and update the message history.
+    def _execute_tools(self, response, messages: list, log: list[str]) -> str | None:
+        """Execute the requested tools.
 
-        Returns True if the agent must stop (finish_task), False otherwise.
+        Returns the final summary if finish_task was called, None otherwise.
         """
         for tool_call in response.tool_calls:
             tool_name = tool_call["name"]
@@ -88,11 +117,6 @@ class AutonomousAgent:
             if tool_name in self.tool_map:
                 try:
                     tool_result = self.tool_map[tool_name].invoke(tool_args)
-
-                    if tool_name == "finish_task":
-                        print(f"\n{tool_result}")
-                        return True
-
                 except Exception as error:
                     tool_result = f"Error executing tool {tool_name}: {error}"
                     logger.error(tool_result)
@@ -100,98 +124,92 @@ class AutonomousAgent:
                 tool_result = f"Error: Tool '{tool_name}' not found."
                 logger.error(tool_result)
 
+            log.append(f"[{tool_name}] args={str(tool_args)[:300]} -> {str(tool_result)[:500]}")
+
+            if tool_name == "finish_task":
+                print(f"\n{tool_result}")
+                return str(tool_result)
+
             print(f"Result:\n{tool_result}")
             print("-" * 50)
-            messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+            messages.append(
+                ToolMessage(content=str(tool_result)[:MAX_TOOL_OUTPUT_CHARS], tool_call_id=tool_id)
+            )
 
-        return False
+        return None
 
-    def _trim_messages_if_needed(
-        self, messages: list, max_tokens_approx: int = 14000
-    ) -> list:
-        """Check and truncate history if the message list becomes too large."""
-        current_length = sum(len(str(m.content)) for m in messages)
+    def _trim_messages_if_needed(self, messages: list, max_tokens_approx: int = 6000) -> list:
+        """Truncate the history if it grows too large, without orphaning tool messages."""
+        if sum(len(str(m.content)) for m in messages) <= max_tokens_approx * 4:
+            return messages
 
-        if current_length > (max_tokens_approx * 4):
-            logger.warning("History too long, trimming intermediate messages...")
-            system_msg = messages[0]
-            user_msg = messages[1]
-            recent_messages = messages[-6:]
+        logger.warning("History too long, trimming intermediate messages...")
+        head = messages[:2]
+        tail = messages[2:][-6:]
+        while tail and not isinstance(tail[0], AIMessage):
+            tail = tail[1:]
+        return head + tail
 
-            return [system_msg, user_msg] + recent_messages
-
-        return messages
-
-    def run(self, task: str, max_steps: int = 15) -> None:
-        """Execute the autonomous tool-use loop for a given task."""
+    def run(self, task: str, max_steps: int = 15, feedback: str | None = None) -> dict:
+        """Execute the tool-use loop and return a report for the supervisor."""
         print(f"\nSTARTING TASK: {task}\n" + "=" * 50)
 
-        messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=f"Task to accomplish: {task}"),
-        ]
+        prompt = f"Task to accomplish: {task}"
+        if feedback:
+            prompt += (
+                "\n\nA supervisor reviewed your previous attempt and rejected it. "
+                f"Fix these issues:\n{feedback}\n"
+                "Files from the previous attempt may still exist in /tmp: check them before rewriting."
+            )
 
+        messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)]
+        log: list[str] = []
+        nudges = 0
         step = 1
+
         while step <= max_steps:
             print(f"\n--- STEP {step}/{max_steps} ---")
-
             messages = self._trim_messages_if_needed(messages)
 
             try:
                 response = self._invoke_llm_with_retry(messages)
             except Exception as error:
-                if "context window" in str(error).lower() or "exceeded" in str(error).lower():
-                    logger.error("Context window overflow exceeded.")
-                else:
-                    logger.error("Fatal LLM failure: %s", error)
-                break
+                logger.error("Fatal LLM failure: %s", error)
+                return {"finished": False, "summary": f"LLM failure: {error}", "log": log}
 
-            messages.append(response)
-
-            if not response.tool_calls and response.content:
-                content = response.content.strip()
-                
-                if content.startswith("```"):
-                    content = re.sub(r"^```(?:json)?\s*", "", content)
-                    content = re.sub(r"\s*```$", "", content)
-                    content = content.strip()
-
-                json_match = re.search(r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}', content, re.DOTALL)
-                if json_match:
-                    try:
-                        json_str = json_match.group(0)
-                        json_str_fixed = json_str.replace(r"\'", "'")
-                        tool_data = json.loads(json_str_fixed)
-                        
-                        response.tool_calls = [{
-                            "name": tool_data["name"],
-                            "args": tool_data["arguments"],
-                            "id": "fallback_json_id"
-                        }]
-                        print(f"[JSON Intercepté] Outil détecté : {tool_data['name']}")
-                    except json.JSONDecodeError as e:
-                        logger.error("Erreur de décodage JSON sur le fallback : %s", e)
-                
-                elif content.startswith("{") and content.endswith("}"):
-                    try:
-                        json_str_fixed = content.replace(r"\'", "'")
-                        tool_data = json.loads(json_str_fixed)
-                        if "name" in tool_data and "arguments" in tool_data:
-                            response.tool_calls = [{
-                                "name": tool_data["name"],
-                                "args": tool_data["arguments"],
-                                "id": "fallback_json_id"
-                            }]
-                            print(f"[JSON Intercepté (Brut)] Outil détecté : {tool_data['name']}")
-                    except json.JSONDecodeError as e:
-                        logger.error("Erreur de décodage JSON sur le bloc global : %s", e)
+            text = response.content or ""
 
             if not response.tool_calls:
-                print("\nTASK COMPLETED OR STOPPED (No tool called).")
-                break
+                fallback = _extract_tool_call(text, set(self.tool_map))
+                if fallback:
+                    response.tool_calls = [fallback]
+                    print(f"[JSON Intercepté] Outil détecté : {fallback['name']}")
 
-            should_finish = self._execute_tools(response, messages)
-            if should_finish:
-                return
+            if response.tool_calls:
+                response.content = ""
+            messages.append(response)
+
+            if not response.tool_calls:
+                if nudges < MAX_NUDGES:
+                    nudges += 1
+                    messages.append(
+                        HumanMessage(
+                            content="You must call one of the available tools. "
+                            "Do not answer in plain text or raw JSON."
+                        )
+                    )
+                    step += 1
+                    continue
+                return {
+                    "finished": False,
+                    "summary": f"Stopped without calling a tool. Last message: {text[:300]}",
+                    "log": log,
+                }
+
+            summary = self._execute_tools(response, messages, log)
+            if summary is not None:
+                return {"finished": True, "summary": summary, "log": log}
 
             step += 1
+
+        return {"finished": False, "summary": "Max steps reached without finish_task.", "log": log}

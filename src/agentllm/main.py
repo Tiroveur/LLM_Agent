@@ -20,7 +20,6 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Lance l'agent autonome dans un bac à sable Docker."
@@ -71,8 +70,7 @@ def main():
 
             try:
                 refined_task = multi_agent.process_task(user_task)
-                #agent.run(refined_task, max_steps=args.max_steps)
-                agent.run(refined_task)
+                multi_agent.supervised_run(agent, refined_task, max_rounds=3, max_steps=args.max_steps)
                 
             except (KeyboardInterrupt, EOFError):
                 print("\nArrêt de la tâche en cours.")
